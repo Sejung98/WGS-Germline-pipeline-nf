@@ -1,0 +1,25 @@
+# Nextflow working dirs and caches
+work/
+.nextflow/
+.nextflow*
+.nfcache/
+.nf-test/
+
+# Pipeline reports and large run outputs (under output_dir)
+Results_germlineMode_nextflow/
+pipeline_info/
+
+# Local heavy tools/resources (keep code separate)
+tool/
+hmftools/
+# germline_only/  # do NOT ignore; keep pipeline bash scripts tracked
+
+# Logs
+*.log
+
+# OS / Editor junk
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
