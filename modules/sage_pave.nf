@@ -7,21 +7,25 @@ process SAGE_PAVE {
     publishDir "${params.output_dir}", mode: 'copy'
     
     input:
-    tuple val(sample_id), path(bam)
+    tuple val(sample_id), path(redux_bam), path(jitter_params), path(ms_table)
     
     output:
     tuple val(sample_id), path("${sample_id}.sage.germline.vcf.gz"), path("${sample_id}.pave.germline.vcf.gz")
     
     when:
-    bam.exists()
+    redux_bam.exists() && jitter_params.exists() && ms_table.exists()
     
     script:
     """
     echo "=== SAGE START: \$(date) ===" 
+    echo "Sample: ${sample_id}"
+    echo "REDUX BAM: ${redux_bam}"
+    echo "Jitter params: ${jitter_params}"
     
+    # SAGE 실행 (REDUX BAM 사용, jitter 파라미터 적용)
     java -Xmx${task.memory.toGiga()}G -jar ${params.sage_jar} \\
         -tumor ${sample_id} \\
-        -tumor_bam ${bam} \\
+        -tumor_bam ${redux_bam} \\
         -hotspots ${params.hotspots} \\
         -high_confidence_bed ${params.high_confidence_bed} \\
         -ref_genome ${params.ref_genome} \\
@@ -29,6 +33,7 @@ process SAGE_PAVE {
         -ensembl_data_dir ${params.ensembl_dir} \\
         -ref_sample_count 0 \\
         -germline \\
+        -jitter_param_dir . \\
         -threads ${task.cpus} \\
         -output_vcf ${sample_id}.sage.germline.vcf.gz
     

@@ -28,6 +28,9 @@ OPTIONS:
   --max-memory SIZE        Maximum memory to use (e.g., 512.GB)
   --threads NUM            Threads per process
   --memory SIZE            Memory per process (e.g., 64.GB)
+  --max-forks NUM          Maximum parallel samples (default: 8)
+  --redux-jar PATH         Path to REDUX JAR file
+  --samtools PATH          Path to samtools executable
   -h, --help               Show this help message
 
 EXAMPLES:
@@ -95,6 +98,18 @@ while [[ $# -gt 0 ]]; do
             MEMORY="$2"
             shift 2
             ;;
+        --max-forks)
+            MAX_FORKS="$2"
+            shift 2
+            ;;
+        --redux-jar)
+            REDUX_JAR="$2"
+            shift 2
+            ;;
+        --samtools)
+            SAMTOOLS="$2"
+            shift 2
+            ;;
         -h|--help)
             show_usage
             exit 0
@@ -139,6 +154,18 @@ fi
 
 if [[ -n "$MEMORY" ]]; then
     NF_CMD="$NF_CMD --memory $MEMORY"
+fi
+
+if [[ -n "$MAX_FORKS" ]]; then
+    NF_CMD="$NF_CMD --max_forks $MAX_FORKS"
+fi
+
+if [[ -n "$REDUX_JAR" ]]; then
+    NF_CMD="$NF_CMD --redux_jar $REDUX_JAR"
+fi
+
+if [[ -n "$SAMTOOLS" ]]; then
+    NF_CMD="$NF_CMD --samtools $SAMTOOLS"
 fi
 
 # Check if Nextflow is installed

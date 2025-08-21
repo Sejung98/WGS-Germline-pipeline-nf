@@ -27,6 +27,8 @@ params.gridss_script = "${params.tools_dir}/gridss.run.sh"
 params.purple_jar = "${params.tools_dir}/purple.jar"
 params.gripss_jar = "${params.tools_dir}/gripss.jar"
 params.linx_jar = "${params.tools_dir}/linx.jar"
+params.redux_jar = "${params.tools_dir}/redux.jar"
+params.samtools = "${params.tools_dir}/samtools"
 
 // Reference files
 params.ref_genome = "${params.resource_dir}/ref_genome/GCA_000001405.15_GRCh38_no_alt_analysis_set.fna"
@@ -73,6 +75,7 @@ Memory per job    : ${params.memory}
 """
 
 // Import modules
+include { REDUX } from './modules/redux'
 include { SAGE_PAVE } from './modules/sage_pave'
 include { AMBER_COBALT } from './modules/amber_cobalt'
 include { GRIDSS } from './modules/gridss'
@@ -89,12 +92,19 @@ workflow {
             tuple(sample_id, bam)
         }
 
-    // Stage 1: Run SAGE_PAVE, AMBER_COBALT, and GRIDSS in parallel
-    sage_pave_ch = SAGE_PAVE(bam_ch)
+    // Stage 1: REDUX (BAM 정제 및 jitter 모델링)
+    redux_ch = REDUX(bam_ch)
+
+    // Stage 2: SAGE_PAVE (REDUX BAM 사용, jitter 파라미터 적용)
+    sage_pave_ch = SAGE_PAVE(redux_ch)
+
+    // Stage 3: AMBER_COBALT (원본 BAM 사용)
     amber_cobalt_ch = AMBER_COBALT(bam_ch)
+
+    // Stage 4: GRIDSS (원본 BAM 사용)
     gridss_ch = GRIDSS(bam_ch)
 
-    // Stage 2: Run GRIPSS (depends on GRIDSS)
+    // Stage 5: GRIPSS (depends on GRIDSS)
     gripss_ch = GRIPSS(gridss_ch)
 
     // Combine results for PURPLE
@@ -105,10 +115,10 @@ workflow {
             tuple(sample_id, sage_pave[1], gripss[1])  // pave_vcf, gripss_vcf
         }
 
-    // Stage 3: Run PURPLE (depends on SAGE_PAVE, AMBER_COBALT, GRIPSS)
+    // Stage 6: PURPLE (depends on SAGE_PAVE, AMBER_COBALT, GRIPSS)
     purple_ch = PURPLE(purple_input_ch)
 
-    // Stage 4: Run LINX (depends on PURPLE)
+    // Stage 7: LINX (depends on PURPLE)
     linx_ch = LINX(purple_ch)
 }
 
