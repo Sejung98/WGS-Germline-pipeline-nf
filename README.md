@@ -1,6 +1,26 @@
 # Hereditary Cancer Germline Analysis Pipeline - Nextflow v2.0
 
-Nextflow pipeline for hereditary cancer germline analysis. **Improved with REDUX integration and semaphore-based parallel processing**.
+Nextflow pipeline for hereditary cancer germline analysis, **based on the Hartwig Medical Foundation (HMF) pipeline**. This pipeline has been **improved with REDUX integration and semaphore-based parallel processing** for enhanced performance and reliability.
+
+## 🏥 About Hartwig Medical Foundation Pipeline
+
+This pipeline is built upon the **Hartwig Medical Foundation (HMF) pipeline**, which is a comprehensive cancer genomics analysis framework developed by the Hartwig Medical Foundation. The HMF pipeline is widely recognized for its robust variant calling, structural variant detection, and copy number analysis capabilities in cancer genomics research.
+
+### HMF Pipeline Components Used:
+- **SAGE**: Germline variant calling with microsatellite instability detection
+- **PAVE**: Variant annotation and filtering
+- **AMBER**: Allele-specific copy number analysis
+- **COBALT**: Copy number ratio analysis
+- **GRIDSS**: Structural variant detection
+- **GRIPSS**: Structural variant filtering and annotation
+- **PURPLE**: Copy number and structural variant integration
+- **LINX**: Driver gene analysis and fusion detection
+
+### Enhancements Over Original HMF Pipeline:
+- **REDUX Integration**: Advanced BAM refinement and microsatellite jitter modeling
+- **Nextflow Implementation**: Improved workflow management and parallel processing
+- **Germline Mode Optimization**: Specialized for hereditary cancer analysis
+- **Enhanced Error Handling**: Robust retry mechanisms and resource management
 
 ## 📁 File Structure
 
@@ -269,10 +289,4 @@ cd /home/ricky8419/09_Hereditary_cancer/002_nextflow_pipeline
 2. **Modified SAGE Parameters**: Germline mode optimization
 3. **Improved Parallel Processing**: Nextflow's semaphore system
 4. **Enhanced Error Handling**: Automatic retry and recovery
-
-### Migration Checklist:
-- [ ] Verify REDUX JAR file path
-- [ ] Verify samtools path
-- [ ] Adjust resource settings (if needed)
-- [ ] Adjust parallel processing count (`maxForks`)
 
