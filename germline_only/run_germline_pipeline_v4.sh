@@ -7,6 +7,9 @@
 
 set -e  # 오류 시 스크립트 중단
 
+# BAM 탐색 안정화
+shopt -s nullglob
+
 # 스크립트 디렉토리 경로
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -66,7 +69,7 @@ EXAMPLES:
   $0 --threads 16         # Use 16 threads per sample
 
 PIPELINE STAGES (each sample runs all stages):
-  Stage 1: SAGE_PAVE, AMBER_COBALT, GRIDSS (parallel within sample)
+  Stage 1: REDUX → SAGE_PAVE → AMBER_COBALT → GRIDSS (sequential within sample)
   Stage 2: GRIPSS, PURPLE (sequential, depends on Stage 1)
   Stage 3: LINX (depends on Stage 2)
 EOF
@@ -138,6 +141,60 @@ validate_samples() {
     fi
 }
 
+# REDUX 실행 함수
+run_redux() {
+    local sample_id=$1
+    local sample_memory=$2
+    local sample_threads=$3
+    local log_file="${LOG_DIR}/redux_${sample_id}_${TIMESTAMP}.log"
+    
+    log_info "[${sample_id}] Starting REDUX"
+    
+    local input_bam="${BAM_DIR}/${sample_id}_markdup.bam"
+    local redux_bam="${OUTPUT_DIR}/${sample_id}.redux.bam"
+    local jitter_params="${OUTPUT_DIR}/${sample_id}.jitter_params.tsv"
+    local ms_table="${OUTPUT_DIR}/${sample_id}.ms_table.tsv.gz"
+    
+    # 입력 파일 확인
+    if [[ ! -f "${input_bam}" ]]; then
+        log_error "[${sample_id}] Input BAM file not found: ${input_bam}"
+        return 1
+    fi
+    
+    # REDUX 실행 (이미 실행된 경우 건너뛰기)
+    if [[ -f "${redux_bam}" && -f "${jitter_params}" && -f "${ms_table}" ]]; then
+        log_info "[${sample_id}] Skipping REDUX, output files exist"
+    else
+        log_info "[${sample_id}] Running REDUX"
+        echo "=== REDUX START: $(date) ===" >> "${log_file}"
+        
+        java -Xmx${sample_memory}G -jar "${REDUX_JAR}" \
+            -sample "${sample_id}" \
+            -input_bam "${input_bam}" \
+            -output_bam "${redux_bam}" \
+            -ref_genome "${REF_GENOME}" \
+            -ref_genome_version "${REF_GENOME_VERSION}" \
+            -unmap_regions "${REDUX_UNMAP_REGIONS}" \
+            -ref_genome_msi_file "${REDUX_MSI_SITES}" \
+            -form_consensus \
+            -write_stats \
+            -bamtool "${SAMTOOLS}" \
+            -output_dir "${OUTPUT_DIR}" \
+            -threads "${sample_threads}" \
+            -log_level INFO >> "${log_file}" 2>&1
+        
+        local redux_exit_code=$?
+        echo "=== REDUX END: $(date), Exit Code: ${redux_exit_code} ===" >> "${log_file}"
+        
+        if [[ ${redux_exit_code} -eq 0 ]]; then
+            log_info "[${sample_id}] REDUX completed successfully"
+        else
+            log_error "[${sample_id}] REDUX failed with exit code ${redux_exit_code}. Check log: ${log_file}"
+            return 1
+        fi
+    fi
+}
+
 # SAGE & PAVE 실행 함수
 run_sage_pave() {
     local sample_id=$1
@@ -147,17 +204,18 @@ run_sage_pave() {
     
     log_info "[${sample_id}] Starting SAGE & PAVE"
     
-    local reference_bam="${BAM_DIR}/${sample_id}_markdup.bam"
+    local reference_bam="${OUTPUT_DIR}/${sample_id}.redux.bam"
     local sage_output_vcf="${OUTPUT_DIR}/${sample_id}.sage.germline.vcf.gz"
     local pave_output_vcf="${OUTPUT_DIR}/${sample_id}.pave.germline.vcf.gz"
     
     # 입력 파일 확인
     if [[ ! -f "${reference_bam}" ]]; then
-        error_exit "[${sample_id}] BAM file not found: ${reference_bam}"
+        log_error "[${sample_id}] BAM file not found: ${reference_bam}"
+        return 1
     fi
     
-    # SAGE 실행
-    if [[ -f "${sage_output_vcf}" ]]; then
+    # SAGE 실행 (파일 존재 및 크기 확인)
+    if [[ -f "${sage_output_vcf}" && -s "${sage_output_vcf}" ]]; then
         log_info "[${sample_id}] Skipping SAGE, output exists"
     else
         log_info "[${sample_id}] Running SAGE"
@@ -166,6 +224,8 @@ run_sage_pave() {
         java -Xmx${sample_memory}G -jar "${SAGE_JAR}" \
             -tumor "${sample_id}" \
             -tumor_bam "${reference_bam}" \
+            -panel_bed "${PANEL_BED}" \
+            -panel_only \
             -hotspots "${HOTSPOTS}" \
             -high_confidence_bed "${HIGH_CONFIDENCE_BED}" \
             -ref_genome "${REF_GENOME}" \
@@ -173,6 +233,7 @@ run_sage_pave() {
             -ensembl_data_dir "${ENSEMBL_DIR}" \
             -ref_sample_count 0 \
             -germline \
+            -jitter_param_dir "${OUTPUT_DIR}" \
             -threads "${sample_threads}" \
             -output_vcf "${sage_output_vcf}" >> "${log_file}" 2>&1
         
@@ -182,12 +243,13 @@ run_sage_pave() {
         if [[ ${sage_exit_code} -eq 0 ]]; then
             log_info "[${sample_id}] SAGE completed successfully"
         else
-            error_exit "[${sample_id}] SAGE failed. Check log: ${log_file}"
+            log_error "[${sample_id}] SAGE failed with exit code ${sage_exit_code}. Check log: ${log_file}"
+            return 1
         fi
     fi
     
-    # PAVE 실행
-    if [[ -f "${pave_output_vcf}" ]]; then
+    # PAVE 실행 (파일 존재 및 크기 확인)
+    if [[ -f "${pave_output_vcf}" && -s "${pave_output_vcf}" ]]; then
         log_info "[${sample_id}] Skipping PAVE, output exists"
     else
         log_info "[${sample_id}] Running PAVE"
@@ -214,7 +276,8 @@ run_sage_pave() {
         if [[ ${pave_exit_code} -eq 0 ]]; then
             log_info "[${sample_id}] PAVE completed successfully"
         else
-            error_exit "[${sample_id}] PAVE failed. Check log: ${log_file}"
+            log_error "[${sample_id}] PAVE failed with exit code ${pave_exit_code}. Check log: ${log_file}"
+            return 1
         fi
     fi
 }
@@ -232,7 +295,8 @@ run_amber_cobalt() {
     
     # 입력 파일 확인
     if [[ ! -f "${reference_bam}" ]]; then
-        error_exit "[${sample_id}] BAM file not found: ${reference_bam}"
+        log_error "[${sample_id}] BAM file not found: ${reference_bam}"
+        return 1
     fi
     
     # AMBER 실행
@@ -252,7 +316,8 @@ run_amber_cobalt() {
     echo "=== AMBER END: $(date), Exit Code: ${amber_exit_code} ===" >> "${log_file}"
     
     if [[ ${amber_exit_code} -ne 0 ]]; then
-        error_exit "[${sample_id}] AMBER failed. Check log: ${log_file}"
+        log_error "[${sample_id}] AMBER failed with exit code ${amber_exit_code}. Check log: ${log_file}"
+        return 1
     fi
     
     # COBALT 실행
@@ -271,7 +336,8 @@ run_amber_cobalt() {
     echo "=== COBALT END: $(date), Exit Code: ${cobalt_exit_code} ===" >> "${log_file}"
     
     if [[ ${cobalt_exit_code} -ne 0 ]]; then
-        error_exit "[${sample_id}] COBALT failed. Check log: ${log_file}"
+        log_error "[${sample_id}] COBALT failed with exit code ${cobalt_exit_code}. Check log: ${log_file}"
+        return 1
     fi
     
     log_info "[${sample_id}] AMBER & COBALT completed successfully"
@@ -294,7 +360,8 @@ run_gridss() {
     
     # 입력 파일 확인
     if [[ ! -f "${reference_bam}" ]]; then
-        error_exit "[${sample_id}] BAM file not found: ${reference_bam}"
+        log_error "[${sample_id}] BAM file not found: ${reference_bam}"
+        return 1
     fi
     
     # SvPrep 실행
@@ -318,7 +385,8 @@ run_gridss() {
     echo "=== SvPrep END: $(date), Exit Code: ${svprep_exit_code} ===" >> "${log_file}"
     
     if [[ ${svprep_exit_code} -ne 0 ]]; then
-        error_exit "[${sample_id}] SvPrep failed. Check log: ${log_file}"
+        log_error "[${sample_id}] SvPrep failed with exit code ${svprep_exit_code}. Check log: ${log_file}"
+        return 1
     fi
     
     # BAM 파일 정렬 및 인덱싱
@@ -331,8 +399,8 @@ run_gridss() {
     echo "=== BAM Sort END: $(date) ===" >> "${log_file}"
     rm -f "${sv_prep_ref_bam}"
     
-    # Gridss 실행
-    if [[ ! -f "${gridss_raw_vcf}" ]]; then
+    # Gridss 실행 (파일 존재 및 크기 확인)
+    if [[ ! -f "${gridss_raw_vcf}" || ! -s "${gridss_raw_vcf}" ]]; then
         log_info "[${sample_id}] Running Gridss"
         echo "=== GRIDSS START: $(date) ===" >> "${log_file}"
         
@@ -353,7 +421,8 @@ run_gridss() {
         echo "=== GRIDSS END: $(date), Exit Code: ${gridss_exit_code} ===" >> "${log_file}"
         
         if [[ ! -f "${gridss_raw_vcf}" ]]; then
-            error_exit "[${sample_id}] Gridss failed. Check log: ${log_file}"
+            log_error "[${sample_id}] Gridss failed to create output file. Check log: ${log_file}"
+            return 1
         fi
     else
         log_info "[${sample_id}] Skipping Gridss, output exists"
@@ -376,7 +445,8 @@ run_gridss() {
     echo "=== DepthAnnotator END: $(date), Exit Code: ${depth_exit_code} ===" >> "${log_file}"
     
     if [[ ${depth_exit_code} -ne 0 ]]; then
-        error_exit "[${sample_id}] DepthAnnotator failed. Check log: ${log_file}"
+        log_error "[${sample_id}] DepthAnnotator failed with exit code ${depth_exit_code}. Check log: ${log_file}"
+        return 1
     fi
     
     log_info "[${sample_id}] GRIDSS completed successfully"
@@ -394,10 +464,11 @@ run_gripss() {
     local output_vcf="${OUTPUT_DIR}/${sample_id}.gripss.germline.vcf.gz"
     local filtered_vcf="${OUTPUT_DIR}/${sample_id}.gripss.filtered.germline.vcf.gz"
     
-    if [[ -f "${filtered_vcf}" ]]; then
+    if [[ -f "${filtered_vcf}" && -s "${filtered_vcf}" ]]; then
         log_info "[${sample_id}] Skipping GRIPSS, output exists"
     elif [[ ! -f "${gridss_raw_vcf}" ]]; then
-        error_exit "[${sample_id}] Missing Gridss VCF: ${gridss_raw_vcf}"
+        log_error "[${sample_id}] Missing Gridss VCF: ${gridss_raw_vcf}"
+        return 1
     else
         log_info "[${sample_id}] Running GRIPSS"
         echo "=== GRIPSS START: $(date) ===" >> "${log_file}"
@@ -421,7 +492,8 @@ run_gripss() {
         if [[ ${exit_code} -eq 0 ]]; then
             log_info "[${sample_id}] GRIPSS completed successfully"
         else
-            error_exit "[${sample_id}] GRIPSS failed. Check log: ${log_file}"
+            log_error "[${sample_id}] GRIPSS failed with exit code ${exit_code}. Check log: ${log_file}"
+            return 1
         fi
     fi
 }
@@ -440,10 +512,12 @@ run_purple() {
     
     # 입력 파일 확인
     if [[ ! -f "${pave_vcf}" ]]; then
-        error_exit "[${sample_id}] Missing PAVE VCF: ${pave_vcf}"
+        log_error "[${sample_id}] Missing PAVE VCF: ${pave_vcf}"
+        return 1
     fi
     if [[ ! -f "${gripss_vcf}" ]]; then
-        error_exit "[${sample_id}] Missing GRIPSS VCF: ${gripss_vcf}"
+        log_error "[${sample_id}] Missing GRIPSS VCF: ${gripss_vcf}"
+        return 1
     fi
     
     log_info "[${sample_id}] Running PURPLE"
@@ -472,7 +546,8 @@ run_purple() {
     if [[ ${exit_code} -eq 0 ]]; then
         log_info "[${sample_id}] PURPLE completed successfully"
     else
-        error_exit "[${sample_id}] PURPLE failed. Check log: ${log_file}"
+        log_error "[${sample_id}] PURPLE failed with exit code ${exit_code}. Check log: ${log_file}"
+        return 1
     fi
 }
 
@@ -487,7 +562,8 @@ run_linx() {
     local purple_sv_vcf="${OUTPUT_DIR}/${sample_id}.purple.sv.germline.vcf.gz"
     
     if [[ ! -f "${purple_sv_vcf}" ]]; then
-        error_exit "[${sample_id}] Missing PURPLE SV VCF: ${purple_sv_vcf}"
+        log_error "[${sample_id}] Missing PURPLE SV VCF: ${purple_sv_vcf}"
+        return 1
     fi
     
     log_info "[${sample_id}] Running LINX"
@@ -509,7 +585,8 @@ run_linx() {
     if [[ ${exit_code} -eq 0 ]]; then
         log_info "[${sample_id}] LINX completed successfully"
     else
-        error_exit "[${sample_id}] LINX failed. Check log: ${log_file}"
+        log_error "[${sample_id}] LINX failed with exit code ${exit_code}. Check log: ${log_file}"
+        return 1
     fi
 }
 
@@ -519,37 +596,63 @@ run_sample_main() {
     local sample_memory=$2
     local sample_threads=$3
     
+    # 샘플별 오류 처리를 위해 set +e 사용 (subshell에서만)
+    # set +e는 subshell 내에서만 적용
+    
     log_info "=== Starting complete pipeline for sample: ${sample_id} ==="
     log_info "[${sample_id}] Memory: ${sample_memory}G, Threads: ${sample_threads}"
     
-    # Stage 1: 병렬 실행 (SAGE_PAVE, AMBER_COBALT, GRIDSS)
-    log_info "[${sample_id}] === Stage 1: SAGE_PAVE, AMBER_COBALT, GRIDSS (parallel) ==="
+    # Stage 1: REDUX → SAGE_PAVE → AMBER_COBALT → GRIDSS (순차 실행)
+    log_info "[${sample_id}] === Stage 1: REDUX → SAGE_PAVE → AMBER_COBALT → GRIDSS (sequential) ==="
     
-    run_sage_pave "${sample_id}" "${sample_memory}" "${sample_threads}" &
-    local sage_pave_pid=$!
+    # REDUX 먼저 실행 (SAGE가 jitter parameter 파일들을 필요로 함)
+    if ! run_redux "${sample_id}" "${sample_memory}" "${sample_threads}"; then
+        log_error "[${sample_id}] REDUX failed, skipping remaining stages"
+        return 1
+    fi
     
-    run_amber_cobalt "${sample_id}" "${sample_memory}" "${sample_threads}" &
-    local amber_cobalt_pid=$!
+    # SAGE_PAVE 실행
+    if ! run_sage_pave "${sample_id}" "${sample_memory}" "${sample_threads}"; then
+        log_error "[${sample_id}] SAGE_PAVE failed, skipping remaining stages"
+        return 1
+    fi
     
-    run_gridss "${sample_id}" "${sample_memory}" "${sample_threads}" &
-    local gridss_pid=$!
+    # AMBER_COBALT 실행
+    if ! run_amber_cobalt "${sample_id}" "${sample_memory}" "${sample_threads}"; then
+        log_error "[${sample_id}] AMBER_COBALT failed, skipping remaining stages"
+        return 1
+    fi
     
-    # Stage 1 완료 대기
-    wait ${sage_pave_pid} ${amber_cobalt_pid} ${gridss_pid}
+    # GRIDSS 실행
+    if ! run_gridss "${sample_id}" "${sample_memory}" "${sample_threads}"; then
+        log_error "[${sample_id}] GRIDSS failed, skipping remaining stages"
+        return 1
+    fi
+    
     log_info "[${sample_id}] === Stage 1 completed ==="
     
     # Stage 2: 순차 실행 (GRIPSS, PURPLE)
     log_info "[${sample_id}] === Stage 2: GRIPSS, PURPLE (sequential) ==="
     
-    run_gripss "${sample_id}" "${sample_memory}"
-    run_purple "${sample_id}" "${sample_memory}" "${sample_threads}"
+    if ! run_gripss "${sample_id}" "${sample_memory}"; then
+        log_error "[${sample_id}] Stage 2 failed at GRIPSS, skipping remaining stages"
+        return 1
+    fi
+    
+    if ! run_purple "${sample_id}" "${sample_memory}" "${sample_threads}"; then
+        log_error "[${sample_id}] Stage 2 failed at PURPLE, skipping remaining stages"
+        return 1
+    fi
     
     log_info "[${sample_id}] === Stage 2 completed ==="
     
     # Stage 3: LINX 실행
     log_info "[${sample_id}] === Stage 3: LINX ==="
     
-    run_linx "${sample_id}" "${sample_memory}"
+    if ! run_linx "${sample_id}" "${sample_memory}"; then
+        log_error "[${sample_id}] Stage 3 failed at LINX"
+        return 1
+    fi
     
     log_info "[${sample_id}] === Stage 3 completed ==="
     
@@ -573,8 +676,9 @@ run_dry_run() {
     for sample_id in "${sample_ids[@]}"; do
         echo "Sample: ${sample_id}"
         echo "  Complete pipeline: Stage 1 → Stage 2 → Stage 3"
-        echo "  Stage 1 (parallel within sample):"
-        echo "    - SAGE_PAVE: ${BAM_DIR}/${sample_id}_markdup.bam → ${OUTPUT_DIR}/${sample_id}.pave.germline.vcf.gz"
+        echo "  Stage 1 (sequential within sample):"
+        echo "    - REDUX: ${BAM_DIR}/${sample_id}_markdup.bam → ${OUTPUT_DIR}/${sample_id}.redux.bam"
+        echo "    - SAGE_PAVE: ${OUTPUT_DIR}/${sample_id}.redux.bam → ${OUTPUT_DIR}/${sample_id}.pave.germline.vcf.gz"
         echo "    - AMBER_COBALT: ${BAM_DIR}/${sample_id}_markdup.bam → ${OUTPUT_DIR}/${sample_id}.amber.baf.tsv.gz"
         echo "    - GRIDSS: ${BAM_DIR}/${sample_id}_markdup.bam → ${OUTPUT_DIR}/${sample_id}_gridss.vcf.gz"
         echo "  Stage 2 (sequential within sample):"
@@ -594,9 +698,9 @@ main() {
     local dry_run=false
     
     # 기본값 설정
-    PARALLEL_SAMPLES=4
-    SAMPLE_MEMORY=${MAX_MEMORY}
-    SAMPLE_THREADS=${THREADS}
+    PARALLEL_SAMPLES=${PARALLEL_SAMPLES:-8}
+    SAMPLE_MEMORY=${SAMPLE_MEMORY:-64}
+    SAMPLE_THREADS=${SAMPLE_THREADS:-8}
     
     # 명령행 인수 파싱
     while [[ $# -gt 0 ]]; do
@@ -673,26 +777,60 @@ main() {
     
     # 각 샘플별로 독립적인 파이프라인 실행
     log_info "Starting ${#final_samples[@]} independent sample pipelines..."
-    
-    local active_jobs=0
-    for sample_id in "${final_samples[@]}"; do
-        # 병렬 작업 수 제한
-        while [[ ${active_jobs} -ge ${PARALLEL_SAMPLES} ]]; do
-            sleep 10
-            active_jobs=$(jobs -r | wc -l)
-        done
-        
-        # 각 샘플의 전체 파이프라인을 백그라운드에서 실행
-        run_sample_main "${sample_id}" "${SAMPLE_MEMORY}" "${SAMPLE_THREADS}" &
-        ((active_jobs++))
-        
-        log_info "Started pipeline for sample ${sample_id} (${active_jobs} active jobs)"
+
+    # 세마포어(토큰 버킷) 준비: PARALLEL_SAMPLES 개의 토큰 채워 넣기
+    sem_fifo="/tmp/pipeline.sem.$$.fifo"
+    mkfifo "$sem_fifo"
+    # FD 3을 FIFO의 read/write로 엽니다 (자식들에게 상속됨)
+    exec 3<>"$sem_fifo"
+    rm -f "$sem_fifo"  # 이름만 제거, FD는 유지됨
+
+    for ((i=0; i<PARALLEL_SAMPLES; i++)); do
+        printf '.' >&3
     done
-    
-    # 모든 샘플 파이프라인 완료 대기
-    log_info "Waiting for all sample pipelines to complete..."
-    wait
-    
+
+    pids=()
+
+    for sample_id in "${final_samples[@]}"; do
+        # 토큰 하나 소비 (블록킹 read)
+        if ! IFS= read -r -n1 <&3; then
+            # FIFO가 닫히면 비정상 상태이니 종료
+            log_error "Semaphore read failed"
+            break
+        fi
+
+        log_info "Starting pipeline for sample ${sample_id}"
+
+        {
+            # 서브셸 내부에서 log 재정의 (메인 로그로만)
+            log() {
+                local message="[$(date '+%Y-%m-%d %H:%M:%S')] $1"
+                echo "${message}" >> "${MAIN_LOG}"
+            }
+
+            # 실제 작업 실행
+            if run_sample_main "${sample_id}" "${SAMPLE_MEMORY}" "${SAMPLE_THREADS}"; then
+                echo "[$(date '+%Y-%m-%d %H:%M:%S')] INFO: [${sample_id}] Sample pipeline completed successfully" >> "${MAIN_LOG}"
+            else
+                echo "[$(date '+%Y-%m-%d %H:%M:%S')] ERROR: [${sample_id}] Sample pipeline failed" >> "${MAIN_LOG}"
+            fi
+
+            # 작업 끝: 토큰 반환
+            printf '.' >&3
+        } &
+        pids+=($!)
+        # 너무 빠른 폭주 방지용 소량 sleep (선택)
+        sleep 0.05
+    done
+
+    # 모든 잡 종료 대기 (개별 실패는 전체 종료로 이어지지 않게)
+    for pid in "${pids[@]}"; do
+        wait "$pid" || true
+    done
+
+    # 세마포어 FD 정리
+    exec 3>&- 3<&-
+
     log_info "=== All sample pipelines completed ==="
     
     # 전역 정리

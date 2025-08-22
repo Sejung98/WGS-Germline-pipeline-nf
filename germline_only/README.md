@@ -1,38 +1,38 @@
 # Hereditary Cancer Germline Pipeline
 
-유전성 암 germline 분석을 위한 통합 파이프라인 스크립트입니다.
+Integrated pipeline scripts for hereditary cancer germline analysis.
 
-## 파일 구조
+## File Structure
 
 ```
 001_scripts/germline_only/
-├── pipeline_config.sh              # 통합 설정 파일
-├── run_germline_pipeline_v4.sh     # 메인 실행 스크립트 (샘플별 독립 파이프라인)
-├── check_setup.sh                  # 설정 검증 스크립트
-└── README.md                       # 사용 가이드
+├── pipeline_config.sh              # Integrated configuration file
+├── run_germline_pipeline_v4.sh     # Main execution script (independent pipeline per sample)
+├── check_setup.sh                  # Configuration verification script
+└── README.md                       # Usage guide
 ```
 
-## 파이프라인 단계
+## Pipeline Stages
 
-### 1단계 (병렬 실행)
-- **SAGE + PAVE**: 변이 호출 및 주석
-- **AMBER + COBALT**: 복사수 변이 분석을 위한 데이터 준비
-- **GRIDSS**: 구조적 변이 호출
+### Stage 1 (Parallel Execution)
+- **SAGE + PAVE**: Variant calling and annotation
+- **AMBER + COBALT**: Data preparation for copy number variant analysis
+- **GRIDSS**: Structural variant calling
 
-### 2단계 (1단계 완료 후)
-- **GRIPSS**: GRIDSS 결과 필터링
-- **PURPLE**: AMBER, COBALT, PAVE 결과 통합 분석
+### Stage 2 (After Stage 1 Completion)
+- **GRIPSS**: GRIDSS result filtering
+- **PURPLE**: Integrated analysis of AMBER, COBALT, and PAVE results
 
-### 3단계 (2단계 완료 후)
-- **LINX**: PURPLE 결과로 구조적 변이 분석
+### Stage 3 (After Stage 2 Completion)
+- **LINX**: Structural variant analysis using PURPLE results
 
-## 사용법
+## Usage
 
-### 1. 설정 확인
-먼저 `pipeline_config.sh` 파일에서 경로들이 올바른지 확인하세요:
+### 1. Configuration Verification
+First, verify that the paths in `pipeline_config.sh` are correct:
 
 ```bash
-# 주요 설정 항목들
+# Key configuration items
 export BASE_DIR="/home/ricky8419/09_Hereditary_cancer"
 export BAM_DIR="${BASE_DIR}/00_rawdata/bam_markdup"
 export OUTPUT_DIR="${BASE_DIR}/Results_germlineMode"
@@ -40,56 +40,56 @@ export TOOLS_DIR="/home/ricky8419/HMF_pipeline/tool"
 export RESOURCE_DIR="/home/ricky8419/HMF_pipeline/resource/38"
 ```
 
-### 2. 파이프라인 실행
+### 2. Pipeline Execution
 ```bash
 cd /home/ricky8419/09_Hereditary_cancer/001_scripts/germline_only
 
-# 모든 샘플 처리 (각 샘플이 독립적인 전체 파이프라인 실행)
+# Process all samples (each sample runs independent complete pipeline)
 ./run_germline_pipeline_v4.sh
 
-# 특정 샘플만 처리
+# Process specific samples only
 ./run_germline_pipeline_v4.sh sample1 sample2
 
-# 병렬 샘플 수 조정
+# Adjust parallel sample count
 ./run_germline_pipeline_v4.sh --parallel 8
 
-# 샘플당 리소스 조정
+# Adjust resources per sample
 ./run_germline_pipeline_v4.sh --max-memory 128 --threads 16
 
-# 사용 가능한 샘플 목록 확인
+# Check available sample list
 ./run_germline_pipeline_v4.sh --list
 
-# 실행 계획 미리보기
+# Preview execution plan
 ./run_germline_pipeline_v4.sh --dry-run
 ```
 
-**주요 특징:**
-- **샘플별 독립 파이프라인**: 각 샘플이 1→2→3단계 전체 파이프라인을 독립적으로 실행
-- **병렬 샘플 처리**: 여러 샘플을 동시에 처리 (기본 4개)
-- **리소스 최적화**: 샘플당 메모리/스레드 할당
-- **완전 독립성**: 한 샘플 실패가 다른 샘플에 영향 없음
-- **유연한 설정**: 병렬 수, 메모리, 스레드 조정 가능
+**Key Features:**
+- **Independent Pipeline per Sample**: Each sample runs the complete 1→2→3 stage pipeline independently
+- **Parallel Sample Processing**: Process multiple samples simultaneously (default: 4)
+- **Resource Optimization**: Memory/thread allocation per sample
+- **Complete Independence**: One sample failure doesn't affect other samples
+- **Flexible Configuration**: Adjustable parallel count, memory, and threads
 
-### 3. 로그 확인
-실행 로그는 `${OUTPUT_DIR}/logs/` 디렉토리에 저장됩니다:
+### 3. Log Monitoring
+Execution logs are stored in `${OUTPUT_DIR}/logs/` directory:
 
-- `pipeline_main_YYYYMMDD_HHMMSS.log`: 메인 파이프라인 로그
-- `{tool}_{sample_id}_YYYYMMDD_HHMMSS.log`: 각 도구별 상세 로그 (시작/종료 시간, 종료 코드 포함)
-- `pipeline_summary_YYYYMMDD_HHMMSS.log`: 실행 요약 및 출력 파일 목록
+- `pipeline_main_YYYYMMDD_HHMMSS.log`: Main pipeline log
+- `{tool}_{sample_id}_YYYYMMDD_HHMMSS.log`: Detailed logs for each tool (including start/end time and exit codes)
+- `pipeline_summary_YYYYMMDD_HHMMSS.log`: Execution summary and output file list
 
-## 입력 파일 요구사항
+## Input File Requirements
 
-### BAM 파일
-- 위치: `${BAM_DIR}/*_markdup.bam`
-- 형식: `{sample_id}_markdup.bam`
-- 요구사항: 인덱스 파일 (`.bam.bai`) 필요
+### BAM Files
+- Location: `${BAM_DIR}/*_markdup.bam`
+- Format: `{sample_id}_markdup.bam`
+- Requirements: Index file (`.bam.bai`) required
 
-### 참조 파일들
-모든 참조 파일들은 `pipeline_config.sh`에서 설정된 경로에 있어야 합니다.
+### Reference Files
+All reference files must be in the paths configured in `pipeline_config.sh`.
 
-## 출력 파일
+## Output Files
 
-각 샘플에 대해 다음 파일들이 생성됩니다:
+The following files are generated for each sample:
 
 ### SAGE & PAVE
 - `{sample_id}.sage.germline.vcf.gz`
@@ -116,76 +116,76 @@ cd /home/ricky8419/09_Hereditary_cancer/001_scripts/germline_only
 - `{sample_id}.linx.germline.disruption.tsv`
 - `{sample_id}.linx.germline.breakend.tsv`
 
-## 시스템 요구사항
+## System Requirements
 
-- **CPU**: 64 코어 (4개 샘플 × 16 스레드 또는 8개 샘플 × 8 스레드)
-- **메모리**: 512GB (4개 샘플 × 128GB 또는 8개 샘플 × 64GB)
-- **디스크**: 충분한 임시 저장 공간 필요 (샘플당 ~100GB 권장)
-- **Java**: 8 이상
+- **CPU**: 64 cores (4 samples × 16 threads or 8 samples × 8 threads)
+- **Memory**: 512GB (4 samples × 128GB or 8 samples × 64GB)
+- **Disk**: Sufficient temporary storage space required (~100GB per sample recommended)
+- **Java**: 8 or higher
 
-**리소스 할당 예시:**
+**Resource Allocation Examples:**
 ```bash
-# 4개 샘플 동시 처리, 샘플당 128GB, 16 스레드
+# Process 4 samples simultaneously, 128GB per sample, 16 threads
 ./run_germline_pipeline_v4.sh --parallel 4 --max-memory 128 --threads 16
 
-# 8개 샘플 동시 처리, 샘플당 64GB, 8 스레드  
+# Process 8 samples simultaneously, 64GB per sample, 8 threads
 ./run_germline_pipeline_v4.sh --parallel 8 --max-memory 64 --threads 8
 ```
 
-## 설정 커스터마이징
+## Configuration Customization
 
-`pipeline_config.sh`에서 다음 항목들을 조정할 수 있습니다:
+You can adjust the following items in `pipeline_config.sh`:
 
 ```bash
-# 시스템 리소스 (기본 버전용)
-export THREADS=64           # CPU 스레드 수
-export MAX_MEMORY=512       # Java 힙 메모리 (GB)
-export GRIDSS_THREADS=8     # GRIDSS 전용 스레드 수
+# System resources (for basic version)
+export THREADS=64           # CPU thread count
+export MAX_MEMORY=512       # Java heap memory (GB)
+export GRIDSS_THREADS=8     # GRIDSS dedicated thread count
 
-# 경로 설정
-export BAM_DIR="..."        # BAM 파일 디렉토리
-export OUTPUT_DIR="..."     # 출력 디렉토리
-export TOOLS_DIR="..."      # 도구 디렉토리
+# Path settings
+export BAM_DIR="..."        # BAM file directory
+export OUTPUT_DIR="..."     # Output directory
+export TOOLS_DIR="..."      # Tools directory
 ```
 
-## SAGE Germline Mode 설정
+## SAGE Germline Mode Configuration
 
-이 파이프라인은 SAGE를 germline mode로 실행하도록 최적화되어 있습니다:
+This pipeline is optimized to run SAGE in germline mode:
 
-### 주요 파라미터
-- `-germline`: germline mode 활성화
-- `-ref_sample_count 0`: germline 필터 비활성화
-- `-tumor` / `-tumor_bam`: 실제로는 reference 샘플 (germline mode에서는 라벨이 반대)
-- **전체 게놈 분석**: panel_only 제거하여 전체 게놈에서 germline 변이 검출
+### Key Parameters
+- `-germline`: Activate germline mode
+- `-ref_sample_count 0`: Disable germline filter
+- `-tumor` / `-tumor_bam`: Actually reference samples (labels are opposite in germline mode)
+- **Whole Genome Analysis**: Remove panel_only to detect germline variants across the entire genome
 
-### 사용된 리소스 파일
-- **Hotspots**: `KnownHotspots.germline.38.vcf.gz` - ClinVar pathogenic/likely pathogenic 변이
-- **High Confidence**: GIAB high confidence 영역
-- **Blacklist**: 보고하지 않을 변이 목록 (PAVE에서 사용)
+### Used Resource Files
+- **Hotspots**: `KnownHotspots.germline.38.vcf.gz` - ClinVar pathogenic/likely pathogenic variants
+- **High Confidence**: GIAB high confidence regions
+- **Blacklist**: Variants not to report (used in PAVE)
 
-### PAVE 후처리
-PAVE는 germline 설정으로 실행되어 다음을 수행합니다:
-- ClinVar 주석 추가
-- Driver gene panel 기반 분류
-- Blacklist 변이 필터링
-- Mappability 정보 추가
+### PAVE Post-processing
+PAVE is executed with germline settings to perform:
+- ClinVar annotation addition
+- Driver gene panel-based classification
+- Blacklist variant filtering
+- Mappability information addition
 
-## 문제 해결
+## Troubleshooting
 
-### 일반적인 문제들
+### Common Issues
 
-1. **메모리 부족**: `MAX_MEMORY` 값을 줄이거나 시스템 메모리를 늘리세요.
-2. **디스크 공간 부족**: 충분한 임시 저장 공간을 확보하세요.
-3. **파일 권한 문제**: 모든 입력 파일과 출력 디렉토리에 대한 읽기/쓰기 권한을 확인하세요.
+1. **Insufficient Memory**: Reduce `MAX_MEMORY` value or increase system memory.
+2. **Insufficient Disk Space**: Ensure sufficient temporary storage space.
+3. **File Permission Issues**: Verify read/write permissions for all input files and output directories.
 
-### 로그 확인
-각 단계별 상세한 오류 정보는 `${LOG_DIR}` 디렉토리의 로그 파일에서 확인할 수 있습니다.
+### Log Review
+Detailed error information for each stage can be found in log files in the `${LOG_DIR}` directory.
 
-### 재시작
-파이프라인은 이미 완료된 작업을 건너뛰므로, 실패 후 재시작해도 안전합니다.
+### Restart
+The pipeline skips already completed tasks, so it's safe to restart after failure.
 
-## 주의사항
+## Important Notes
 
-- 파이프라인 실행 중에는 출력 디렉토리의 파일을 수정하지 마세요.
-- 충분한 디스크 공간을 확보한 후 실행하세요.
-- 시스템 리소스 설정을 하드웨어 사양에 맞게 조정하세요.
+- Do not modify files in the output directory during pipeline execution.
+- Ensure sufficient disk space before execution.
+- Adjust system resource settings according to hardware specifications.
